@@ -41,4 +41,4 @@ English Tutor AI — это интерактивное приложение дл
 
 1. Склонируйте репозиторий:
    ```bash
-   git clone https://github.com/yourusername/english-tutor-ai.git
+   git clone https://github.com/reportsdasishow-prog/english-tutor-ai.git
