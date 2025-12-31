@@ -30,33 +30,24 @@ export class GeminiLiveService {
     try {
       handlers.onStatusChange('connecting');
 
-      // Check if API key selection is needed for preview models in this environment
+      // Mandatory check for API key selection in this environment
       if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
         await window.aistudio.openSelectKey();
-        // Proceeding as per instructions: assume success after trigger
+        // Instructions: assume success after triggering the dialog
       }
 
-      // Initialize AI with the latest key
+      // Re-initialize to ensure the latest selected key is used
       this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-      // Setup audio contexts
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       
-      // Ensure contexts are running
-      if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
-      if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
-
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const systemInstruction = `
         ${scenarioPrompt}
         The user is a Russian speaker learning English. 
-        Focus on correcting common Slavic mistakes: 
-        1. Dropping "a" or "the".
-        2. Confusion between "to be" and other verbs.
-        3. Present Perfect vs Past Simple usage.
-        Be encouraging. Respond in English. If the user is stuck, give a hint in English.
+        Keep responses helpful and use English only.
       `;
 
       this.sessionPromise = this.ai.live.connect({
@@ -67,7 +58,6 @@ export class GeminiLiveService {
             this.startMicStreaming();
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Handle Transcription
             if (message.serverContent?.outputTranscription) {
               this.currentOutputTranscription += message.serverContent.outputTranscription.text;
               handlers.onTranscription(this.currentOutputTranscription, 'model', false);
@@ -76,7 +66,6 @@ export class GeminiLiveService {
               handlers.onTranscription(this.currentInputTranscription, 'user', false);
             }
 
-            // Handle Turn Completion
             if (message.serverContent?.turnComplete) {
               if (this.currentInputTranscription) handlers.onTranscription(this.currentInputTranscription, 'user', true);
               if (this.currentOutputTranscription) handlers.onTranscription(this.currentOutputTranscription, 'model', true);
@@ -84,55 +73,40 @@ export class GeminiLiveService {
               this.currentOutputTranscription = '';
             }
 
-            // Handle Audio Data
-            const parts = message.serverContent?.modelTurn?.parts;
-            if (parts) {
-              for (const part of parts) {
-                const base64Audio = part.inlineData?.data;
-                if (base64Audio && this.outputAudioContext) {
-                  this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
-                  const audioBuffer = await decodeAudioData(
-                    decode(base64Audio),
-                    this.outputAudioContext,
-                    24000,
-                    1
-                  );
-                  const source = this.outputAudioContext.createBufferSource();
-                  source.buffer = audioBuffer;
-                  source.connect(this.outputAudioContext.destination);
-                  source.addEventListener('ended', () => {
-                    this.sources.delete(source);
-                  });
-
-                  source.start(this.nextStartTime);
-                  this.nextStartTime += audioBuffer.duration;
-                  this.sources.add(source);
-                }
-              }
+            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            if (base64Audio && this.outputAudioContext) {
+              this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
+              const audioBuffer = await decodeAudioData(
+                decode(base64Audio),
+                this.outputAudioContext,
+                24000,
+                1
+              );
+              const source = this.outputAudioContext.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(this.outputAudioContext.destination);
+              source.start(this.nextStartTime);
+              this.nextStartTime += audioBuffer.duration;
+              this.sources.add(source);
+              source.onended = () => this.sources.delete(source);
             }
 
-            // Handle Interruption
-            const interrupted = message.serverContent?.interrupted;
-            if (interrupted) {
-              for (const source of this.sources.values()) {
-                try { source.stop(); } catch(e) {}
-              }
+            if (message.serverContent?.interrupted) {
+              this.sources.forEach(s => { try { s.stop(); } catch(e) {} });
               this.sources.clear();
               this.nextStartTime = 0;
             }
           },
-          onerror: (e) => {
+          onerror: (e: any) => {
             console.error('Gemini Live Error:', e);
-            const errorMsg = e instanceof Error ? e.message : 'Ошибка соединения с API.';
-            if (errorMsg.includes('Requested entity was not found')) {
-               handlers.onStatusChange('error', 'Ключ API не найден. Пожалуйста, выберите платный проект.');
-               window.aistudio?.openSelectKey();
+            if (e?.message?.includes('entity was not found')) {
+              handlers.onStatusChange('error', 'Ключ API не найден или не активен. Выберите другой.');
+              window.aistudio?.openSelectKey();
             } else {
-               handlers.onStatusChange('error', `Ошибка: ${errorMsg}`);
+              handlers.onStatusChange('error', 'Произошла ошибка при подключении к ИИ.');
             }
           },
-          onclose: (e) => {
-            console.log('Gemini Live Closed:', e);
+          onclose: () => {
             handlers.onStatusChange('disconnected');
           },
         },
@@ -149,22 +123,19 @@ export class GeminiLiveService {
         },
       });
 
-      // Visualizer loop
       const updateLevel = () => {
         if (this.analyser && handlers.onAudioLevel) {
           const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
           this.analyser.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          handlers.onAudioLevel(average / 128); 
+          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          handlers.onAudioLevel(average / 128);
           if (this.stream?.active) requestAnimationFrame(updateLevel);
         }
       };
-      
       setTimeout(updateLevel, 500);
 
-    } catch (err: any) {
-      console.error('Session Start Error:', err);
-      handlers.onStatusChange('error', err.message || 'Не удалось запустить сессию.');
+    } catch (err) {
+      handlers.onStatusChange('error', 'Ошибка доступа к микрофону или API.');
     }
   }
 
@@ -174,19 +145,13 @@ export class GeminiLiveService {
     const source = this.inputAudioContext.createMediaStreamSource(this.stream);
     this.analyser = this.inputAudioContext.createAnalyser();
     this.analyser.fftSize = 256;
-    
     this.scriptProcessor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
 
     this.scriptProcessor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
       const pcmBlob = createBlob(inputData);
-      
       this.sessionPromise?.then((session) => {
-        try {
-          session.sendRealtimeInput({ media: pcmBlob });
-        } catch (err) {
-          // Ignore if session closed
-        }
+        session.sendRealtimeInput({ media: pcmBlob });
       });
     };
 
@@ -197,27 +162,12 @@ export class GeminiLiveService {
 
   async stopSession() {
     if (this.sessionPromise) {
-      try {
-        const session = await this.sessionPromise;
-        session.close();
-      } catch (e) {}
+      const session = await this.sessionPromise;
+      try { session.close(); } catch (e) {}
     }
-    
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-    }
-
-    if (this.inputAudioContext) await this.inputAudioContext.close();
-    if (this.outputAudioContext) await this.outputAudioContext.close();
-
+    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
     this.sources.forEach(s => { try { s.stop(); } catch(e) {} });
     this.sources.clear();
-    
     this.sessionPromise = null;
-    this.inputAudioContext = null;
-    this.outputAudioContext = null;
-    this.stream = null;
-    this.analyser = null;
-    this.scriptProcessor = null;
   }
 }
