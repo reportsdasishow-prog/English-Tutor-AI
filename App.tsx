@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { SCENARIOS, VOICES } from './constants';
 import { Scenario, Message, ConnectionStatus } from './types';
@@ -17,25 +18,36 @@ const App: React.FC = () => {
   const serviceRef = useRef<GeminiLiveService>(new GeminiLiveService());
 
   const handleStatusChange = useCallback((newStatus: string, error?: string) => {
-    console.log('Status update:', newStatus);
+    console.log('Status update:', newStatus, error);
     switch (newStatus) {
-      case 'connecting': setStatus(ConnectionStatus.CONNECTING); break;
-      case 'connected': setStatus(ConnectionStatus.CONNECTED); setErrorMessage(null); break;
+      case 'connecting': 
+        setStatus(ConnectionStatus.CONNECTING); 
+        setErrorMessage(null);
+        break;
+      case 'connected': 
+        setStatus(ConnectionStatus.CONNECTED); 
+        setErrorMessage(null); 
+        break;
       case 'disconnected': 
         setStatus(ConnectionStatus.DISCONNECTED); 
         setAudioLevel(0);
         setCurrentPartial(null);
         break;
-      case 'error': setStatus(ConnectionStatus.ERROR); setErrorMessage(error || 'Произошла ошибка'); break;
+      case 'error': 
+        setStatus(ConnectionStatus.ERROR); 
+        setErrorMessage(error || 'Произошла внутренняя ошибка'); 
+        break;
     }
   }, []);
 
   const toggleSession = async () => {
     if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING) {
       await serviceRef.current.stopSession();
+      setStatus(ConnectionStatus.DISCONNECTED);
     } else {
       setMessages([]);
       setCurrentPartial(null);
+      setErrorMessage(null);
       await serviceRef.current.startSession(
         selectedScenario.prompt,
         selectedVoice,
@@ -60,6 +72,12 @@ const App: React.FC = () => {
     }
   };
 
+  const openKeySelector = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc] pb-20">
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
@@ -72,6 +90,13 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            <button 
+              onClick={openKeySelector}
+              className="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded font-bold text-slate-600 transition-colors"
+            >
+              <i className="fa-solid fa-key mr-1"></i> API KEY
+            </button>
+            
             <select 
               value={selectedVoice}
               onChange={(e) => setSelectedVoice(e.target.value)}
@@ -144,8 +169,16 @@ const App: React.FC = () => {
                   {status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING ? 'Завершить сессию' : 'Начать разговор'}
                 </button>
                 {errorMessage && (
-                  <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
+                  <div className="p-4 bg-red-50 border border-red-100 rounded-xl space-y-2">
                     <p className="text-xs text-red-600 font-medium">{errorMessage}</p>
+                    {errorMessage.includes('Ключ API') && (
+                      <button 
+                        onClick={openKeySelector}
+                        className="text-[10px] text-red-700 underline font-bold"
+                      >
+                        Выбрать другой ключ
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

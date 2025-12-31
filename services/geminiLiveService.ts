@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { decode, decodeAudioData, createBlob } from '../utils/audioUtils';
 import { GEMINI_MODEL } from '../constants';
@@ -29,12 +30,23 @@ export class GeminiLiveService {
     try {
       handlers.onStatusChange('connecting');
 
-      // Инициализируем AI с ключом из окружения
+      // Check if API key selection is needed for preview models in this environment
+      if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+        await window.aistudio.openSelectKey();
+        // Proceeding as per instructions: assume success after trigger
+      }
+
+      // Initialize AI with the latest key
       this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+      // Setup audio contexts
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       
+      // Ensure contexts are running
+      if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
+      if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
+
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const systemInstruction = `
@@ -55,7 +67,7 @@ export class GeminiLiveService {
             this.startMicStreaming();
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Обработка транскрипции
+            // Handle Transcription
             if (message.serverContent?.outputTranscription) {
               this.currentOutputTranscription += message.serverContent.outputTranscription.text;
               handlers.onTranscription(this.currentOutputTranscription, 'model', false);
@@ -64,7 +76,7 @@ export class GeminiLiveService {
               handlers.onTranscription(this.currentInputTranscription, 'user', false);
             }
 
-            // Завершение реплики
+            // Handle Turn Completion
             if (message.serverContent?.turnComplete) {
               if (this.currentInputTranscription) handlers.onTranscription(this.currentInputTranscription, 'user', true);
               if (this.currentOutputTranscription) handlers.onTranscription(this.currentOutputTranscription, 'model', true);
@@ -72,43 +84,55 @@ export class GeminiLiveService {
               this.currentOutputTranscription = '';
             }
 
-            // Обработка аудио от модели
-            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (base64Audio && this.outputAudioContext) {
-              this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
-              const audioBuffer = await decodeAudioData(
-                decode(base64Audio),
-                this.outputAudioContext,
-                24000,
-                1
-              );
-              const source = this.outputAudioContext.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(this.outputAudioContext.destination);
-              source.addEventListener('ended', () => {
-                this.sources.delete(source);
-              });
+            // Handle Audio Data
+            const parts = message.serverContent?.modelTurn?.parts;
+            if (parts) {
+              for (const part of parts) {
+                const base64Audio = part.inlineData?.data;
+                if (base64Audio && this.outputAudioContext) {
+                  this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
+                  const audioBuffer = await decodeAudioData(
+                    decode(base64Audio),
+                    this.outputAudioContext,
+                    24000,
+                    1
+                  );
+                  const source = this.outputAudioContext.createBufferSource();
+                  source.buffer = audioBuffer;
+                  source.connect(this.outputAudioContext.destination);
+                  source.addEventListener('ended', () => {
+                    this.sources.delete(source);
+                  });
 
-              source.start(this.nextStartTime);
-              this.nextStartTime += audioBuffer.duration;
-              this.sources.add(source);
+                  source.start(this.nextStartTime);
+                  this.nextStartTime += audioBuffer.duration;
+                  this.sources.add(source);
+                }
+              }
             }
 
-            // Обработка прерывания
+            // Handle Interruption
             const interrupted = message.serverContent?.interrupted;
             if (interrupted) {
               for (const source of this.sources.values()) {
                 try { source.stop(); } catch(e) {}
-                this.sources.delete(source);
               }
+              this.sources.clear();
               this.nextStartTime = 0;
             }
           },
           onerror: (e) => {
             console.error('Gemini Live Error:', e);
-            handlers.onStatusChange('error', 'Ошибка соединения с API.');
+            const errorMsg = e instanceof Error ? e.message : 'Ошибка соединения с API.';
+            if (errorMsg.includes('Requested entity was not found')) {
+               handlers.onStatusChange('error', 'Ключ API не найден. Пожалуйста, выберите платный проект.');
+               window.aistudio?.openSelectKey();
+            } else {
+               handlers.onStatusChange('error', `Ошибка: ${errorMsg}`);
+            }
           },
-          onclose: () => {
+          onclose: (e) => {
+            console.log('Gemini Live Closed:', e);
             handlers.onStatusChange('disconnected');
           },
         },
@@ -125,23 +149,22 @@ export class GeminiLiveService {
         },
       });
 
-      // Передаем уровень громкости для визуализации
+      // Visualizer loop
       const updateLevel = () => {
         if (this.analyser && handlers.onAudioLevel) {
           const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
           this.analyser.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          handlers.onAudioLevel(average / 128); // Нормализация 0-1
+          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+          handlers.onAudioLevel(average / 128); 
           if (this.stream?.active) requestAnimationFrame(updateLevel);
         }
       };
       
-      // Ждем инициализации анализатора в startMicStreaming
-      setTimeout(updateLevel, 1000);
+      setTimeout(updateLevel, 500);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Session Start Error:', err);
-      handlers.onStatusChange('error', 'Не удалось получить доступ к микрофону.');
+      handlers.onStatusChange('error', err.message || 'Не удалось запустить сессию.');
     }
   }
 
@@ -162,7 +185,7 @@ export class GeminiLiveService {
         try {
           session.sendRealtimeInput({ media: pcmBlob });
         } catch (err) {
-          // Игнорируем ошибки отправки если сессия закрыта
+          // Ignore if session closed
         }
       });
     };
@@ -174,8 +197,10 @@ export class GeminiLiveService {
 
   async stopSession() {
     if (this.sessionPromise) {
-      const session = await this.sessionPromise;
-      try { session.close(); } catch (e) {}
+      try {
+        const session = await this.sessionPromise;
+        session.close();
+      } catch (e) {}
     }
     
     if (this.stream) {
@@ -192,5 +217,7 @@ export class GeminiLiveService {
     this.inputAudioContext = null;
     this.outputAudioContext = null;
     this.stream = null;
+    this.analyser = null;
+    this.scriptProcessor = null;
   }
 }

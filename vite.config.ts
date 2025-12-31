@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    'process.env': {} // Заглушка для process.env, если используется в браузере
+    // We allow process.env to be populated by the environment.
+    // If you need to mock it for dev, do it conditionally.
   },
-  base: './' // Важно для корректных путей на GitHub Pages
+  base: './' 
 });
