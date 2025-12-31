@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { decode, decodeAudioData, createBlob } from '../utils/audioUtils';
 import { GEMINI_MODEL } from '../constants';
@@ -18,6 +17,7 @@ export class GeminiLiveService {
   private sources = new Set<AudioBufferSourceNode>();
   private stream: MediaStream | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
+  private analyser: AnalyserNode | null = null;
   private currentInputTranscription = '';
   private currentOutputTranscription = '';
 
@@ -26,8 +26,8 @@ export class GeminiLiveService {
   }
 
   async startSession(
-    language: string,
     scenarioPrompt: string,
+    voiceName: string,
     handlers: LiveSessionHandlers
   ) {
     try {
@@ -41,12 +41,13 @@ export class GeminiLiveService {
       const systemInstruction = `
         ${scenarioPrompt}
         The user is a Russian speaker learning English. 
-        Conduct the conversation in English.
-        Be an encouraging and professional English tutor.
-        If the user is struggling or asks for help, you can use Russian briefly to explain complex grammatical points or provide translations.
-        Pay special attention to common mistakes made by Russian speakers: articles (a/the), prepositions, and present perfect vs past simple.
-        Gently correct the user and provide a more natural alternative in English.
-        Keep your responses natural but clear.
+        Always respond in English unless the user is completely lost.
+        If the user uses Russian, translate their phrase to English first and then respond.
+        Focus on correcting common Slavic mistakes: 
+        1. Dropping "a" or "the".
+        2. Confusion between "to be" and other verbs.
+        3. Present Perfect vs Past Simple usage.
+        Be encouraging, supportive, and act like a high-end personal tutor.
       `;
 
       this.sessionPromise = this.ai.live.connect({
@@ -54,16 +55,14 @@ export class GeminiLiveService {
         callbacks: {
           onopen: () => {
             handlers.onStatusChange('connected');
-            this.startMicStreaming();
+            this.startMicStreaming(handlers);
           },
           onmessage: async (message: LiveServerMessage) => {
             if (message.serverContent?.outputTranscription) {
-              const text = message.serverContent.outputTranscription.text;
-              this.currentOutputTranscription += text;
+              this.currentOutputTranscription += message.serverContent.outputTranscription.text;
               handlers.onTranscription(this.currentOutputTranscription, 'model');
             } else if (message.serverContent?.inputTranscription) {
-              const text = message.serverContent.inputTranscription.text;
-              this.currentInputTranscription += text;
+              this.currentInputTranscription += message.serverContent.inputTranscription.text;
               handlers.onTranscription(this.currentInputTranscription, 'user');
             }
 
@@ -75,39 +74,27 @@ export class GeminiLiveService {
             const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audioData && this.outputAudioContext) {
               this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
-              
-              const buffer = await decodeAudioData(
-                decode(audioData),
-                this.outputAudioContext,
-                24000,
-                1
-              );
-
+              const buffer = await decodeAudioData(decode(audioData), this.outputAudioContext, 24000, 1);
               const source = this.outputAudioContext.createBufferSource();
               source.buffer = buffer;
               source.connect(this.outputAudioContext.destination);
-              source.addEventListener('ended', () => {
-                this.sources.delete(source);
-              });
-
+              source.addEventListener('ended', () => this.sources.delete(source));
               source.start(this.nextStartTime);
               this.nextStartTime += buffer.duration;
               this.sources.add(source);
             }
 
             if (message.serverContent?.interrupted) {
-              this.sources.forEach(s => s.stop());
+              this.sources.forEach(s => { try { s.stop(); } catch(e) {} });
               this.sources.clear();
               this.nextStartTime = 0;
             }
           },
           onerror: (e) => {
             console.error('Gemini Live Error:', e);
-            handlers.onStatusChange('error', 'Ошибка подключения к серверу.');
+            handlers.onStatusChange('error', 'Connection failed.');
           },
-          onclose: () => {
-            handlers.onStatusChange('disconnected');
-          },
+          onclose: () => handlers.onStatusChange('disconnected'),
         },
         config: {
           responseModalities: [Modality.AUDIO],
@@ -115,34 +102,45 @@ export class GeminiLiveService {
           inputAudioTranscription: {},
           systemInstruction,
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
+            voiceConfig: { prebuiltVoiceConfig: { voiceName } }
           }
         },
       });
 
     } catch (err) {
-      console.error('Failed to start session:', err);
-      handlers.onStatusChange('error', 'Не удалось получить доступ к микрофону.');
+      handlers.onStatusChange('error', 'Microphone access denied.');
     }
   }
 
-  private startMicStreaming() {
+  private startMicStreaming(handlers: LiveSessionHandlers) {
     if (!this.stream || !this.inputAudioContext || !this.sessionPromise) return;
 
     const source = this.inputAudioContext.createMediaStreamSource(this.stream);
+    this.analyser = this.inputAudioContext.createAnalyser();
+    this.analyser.fftSize = 256;
+    
     this.scriptProcessor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
+
+    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    const updateAudioLevel = () => {
+      if (this.analyser && handlers.onAudioLevel) {
+        this.analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        handlers.onAudioLevel(average / 128); // Normalize to 0-1 range
+        requestAnimationFrame(updateAudioLevel);
+      }
+    };
+    updateAudioLevel();
 
     this.scriptProcessor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
       const pcmBlob = createBlob(inputData);
-
-      this.sessionPromise?.then((session) => {
-        session.sendRealtimeInput({ media: pcmBlob });
-      });
+      this.sessionPromise?.then(session => session.sendRealtimeInput({ media: pcmBlob }));
     };
 
-    source.connect(this.scriptProcessor);
+    source.connect(this.analyser);
     this.scriptProcessor.connect(this.inputAudioContext.destination);
+    source.connect(this.scriptProcessor);
   }
 
   async stopSession() {
@@ -150,19 +148,12 @@ export class GeminiLiveService {
       const session = await this.sessionPromise;
       session.close();
     }
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-    }
-
-    if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect();
-    }
-
-    this.sources.forEach(s => s.stop());
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    if (this.scriptProcessor) this.scriptProcessor.disconnect();
+    this.sources.forEach(s => { try { s.stop(); } catch(e) {} });
     this.sources.clear();
-
     await this.inputAudioContext?.close();
     await this.outputAudioContext?.close();
+    this.analyser = null;
   }
 }

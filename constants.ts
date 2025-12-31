@@ -1,39 +1,46 @@
-
 import { Language, Scenario } from './types';
 
 export const LANGUAGES: Language[] = [
-  { code: 'en-US', name: 'English (US)', flag: '🇺🇸', nativeName: 'English' },
-  { code: 'en-GB', name: 'English (UK)', flag: '🇬🇧', nativeName: 'English' },
+  { code: 'en-US', name: 'Английский (США)', flag: '🇺🇸', nativeName: 'English' },
+  { code: 'en-GB', name: 'Английский (Британия)', flag: '🇬🇧', nativeName: 'English' },
+];
+
+export const VOICES = [
+  { id: 'Kore', name: 'Кора (Женский - Профи)', gender: 'Female' },
+  { id: 'Zephyr', name: 'Зефир (Мужской - Энергичный)', gender: 'Male' },
+  { id: 'Puck', name: 'Пак (Женский - Игривый)', gender: 'Female' },
+  { id: 'Charon', name: 'Харон (Мужской - Спокойный)', gender: 'Male' },
+  { id: 'Fenrir', name: 'Фенрир (Мужской - Глубокий)', gender: 'Male' },
 ];
 
 export const SCENARIOS: Scenario[] = [
   {
     id: 'general',
     title: 'Свободное общение',
-    description: 'Говорите о чем угодно для практики речи.',
+    description: 'Просто болтаем на любые темы, как старые друзья.',
     icon: 'fa-comments',
-    prompt: 'You are a friendly English language partner for a Russian speaker. Engage in a casual conversation.'
+    prompt: 'Ты — дружелюбный партнер для общения на английском. Твоя цель — поддерживать естественный диалог. Задавай открытые вопросы и будь эмоциональным.'
   },
   {
     id: 'interview',
     title: 'Собеседование',
-    description: 'Подготовьтесь к вопросам на английском языке.',
-    icon: 'fa-briefcase',
-    prompt: 'You are an HR manager at an international company. The user is a candidate from Russia applying for a software engineer position.'
+    description: 'Подготовка к интервью в международную IT-компанию.',
+    icon: 'fa-user-tie',
+    prompt: 'Ты — HR-менеджер крупной тех-компании. Проведи формальное интервью на позицию Software Engineer. Спрашивай о проектах и софт-скиллах.'
   },
   {
     id: 'travel',
-    title: 'Путешествие: Аэропорт',
-    description: 'Практикуйте прохождение регистрации и контроля.',
-    icon: 'fa-plane',
-    prompt: 'You are an airport staff member. The user is a traveler who needs help with check-in or finding their gate.'
+    title: 'Путешествие',
+    description: 'Практика в аэропорту, отеле или кафе.',
+    icon: 'fa-earth-americas',
+    prompt: 'Ты — сотрудник службы поддержки или местный житель. Пользователь — турист. Отрабатывай ситуации регистрации в отеле или заказа еды.'
   },
   {
     id: 'grammar',
-    title: 'Разбор грамматики',
-    description: 'ИИ поможет вам понять сложные правила.',
-    icon: 'fa-book-open',
-    prompt: 'You are an English grammar tutor. Focus on helping the user practice specific constructions. If they make a mistake typical for Russian speakers (like missing articles), explain the rule briefly.'
+    title: 'Учитель грамматики',
+    description: 'Фокус на ошибках и четких объяснениях правил.',
+    icon: 'fa-spell-check',
+    prompt: 'Ты — строгий, но справедливый учитель английского. Внимательно слушай. Если пользователь допускает ошибку (артикли, времена), мягко прерви и объясни, как правильно.'
   }
 ];
 

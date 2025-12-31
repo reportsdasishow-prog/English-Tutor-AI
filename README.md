@@ -1,20 +1,30 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# LingoLive AI - Изучение языков с ИИ
 
-# Run and deploy your AI Studio app
+Это приложение для практики разговорного английского языка с использованием Gemini Live API.
 
-This contains everything you need to run your app locally.
+## Запуск на GNU/Linux (Debian/Ubuntu)
 
-View your app in AI Studio: https://ai.studio/apps/drive/1rnH2434HjLcJy9W6Wb6JpSSf4nSXt4mY
+1. Убедитесь, что у вас установлен Node.js:
+   ```bash
+   sudo apt update
+   sudo apt install nodejs npm
+   ```
 
-## Run Locally
+2. Сделайте скрипт запуска исполняемым:
+   ```bash
+   chmod +x launch.sh
+   ```
 
-**Prerequisites:**  Node.js
+3. Запустите приложение:
+   ```bash
+   ./launch.sh
+   ```
 
+4. Откройте в браузере адрес, который появится в терминале (обычно `http://localhost:5173`).
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Интеграция в систему
+Чтобы запускать приложение из главного меню:
+```bash
+mkdir -p ~/.local/share/applications
+cp lingolive.desktop ~/.local/share/applications/
+```
