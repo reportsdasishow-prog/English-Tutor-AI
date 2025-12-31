@@ -17,6 +17,7 @@ const App: React.FC = () => {
   const serviceRef = useRef<GeminiLiveService>(new GeminiLiveService());
 
   const handleStatusChange = useCallback((newStatus: string, error?: string) => {
+    console.log('Status update:', newStatus);
     switch (newStatus) {
       case 'connecting': setStatus(ConnectionStatus.CONNECTING); break;
       case 'connected': setStatus(ConnectionStatus.CONNECTED); setErrorMessage(null); break;
@@ -25,7 +26,7 @@ const App: React.FC = () => {
         setAudioLevel(0);
         setCurrentPartial(null);
         break;
-      case 'error': setStatus(ConnectionStatus.ERROR); setErrorMessage(error || 'Ошибка'); break;
+      case 'error': setStatus(ConnectionStatus.ERROR); setErrorMessage(error || 'Произошла ошибка'); break;
     }
   }, []);
 
@@ -74,23 +75,26 @@ const App: React.FC = () => {
             <select 
               value={selectedVoice}
               onChange={(e) => setSelectedVoice(e.target.value)}
-              className="bg-slate-100 border-none rounded-lg px-3 py-1.5 text-xs font-semibold"
+              className="bg-slate-100 border-none rounded-lg px-3 py-1.5 text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
               disabled={status !== ConnectionStatus.DISCONNECTED}
             >
               {VOICES.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
 
-            <div className={`px-3 py-1 rounded-full flex items-center gap-2 border text-[10px] font-bold uppercase tracking-widest ${
+            <div className={`px-3 py-1 rounded-full flex items-center gap-2 border text-[10px] font-bold uppercase tracking-widest transition-colors ${
               status === ConnectionStatus.CONNECTED ? 'bg-green-50 border-green-200 text-green-700' :
               status === ConnectionStatus.CONNECTING ? 'bg-amber-50 border-amber-200 text-amber-700' :
+              status === ConnectionStatus.ERROR ? 'bg-red-50 border-red-200 text-red-700' :
               'bg-slate-50 border-slate-200 text-slate-500'
             }`}>
               <span className={`w-2 h-2 rounded-full ${
                 status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' :
-                status === ConnectionStatus.CONNECTING ? 'bg-amber-500 animate-pulse' : 'bg-slate-300'
+                status === ConnectionStatus.CONNECTING ? 'bg-amber-500 animate-pulse' : 
+                status === ConnectionStatus.ERROR ? 'bg-red-500' : 'bg-slate-300'
               }`}></span>
               {status === ConnectionStatus.CONNECTED ? 'В эфире' : 
-               status === ConnectionStatus.CONNECTING ? 'Связь...' : 'Ожидание'}
+               status === ConnectionStatus.CONNECTING ? 'Связь...' : 
+               status === ConnectionStatus.ERROR ? 'Ошибка' : 'Ожидание'}
             </div>
           </div>
         </div>
@@ -112,14 +116,14 @@ const App: React.FC = () => {
             </section>
 
             <section className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-center space-y-6">
-              <div className={`w-32 h-32 mx-auto rounded-full flex items-center justify-center transition-all ${
-                status === ConnectionStatus.CONNECTED ? 'bg-blue-600 scale-105 shadow-2xl' : 'bg-slate-100'
+              <div className={`w-32 h-32 mx-auto rounded-full flex items-center justify-center transition-all duration-300 ${
+                status === ConnectionStatus.CONNECTED ? 'bg-blue-600 scale-105 shadow-blue-200 shadow-2xl' : 'bg-slate-100'
               }`}>
                 {status === ConnectionStatus.CONNECTED ? (
                   <div className="flex items-end gap-1.5 h-12">
                     {[1, 2, 3, 4, 5].map(i => (
-                      <div key={i} className="w-1.5 bg-white rounded-full transition-all"
-                        style={{ height: `${20 + (audioLevel * 80 * (0.5 + Math.random() * 0.5))}%` }}
+                      <div key={i} className="w-2 bg-white rounded-full transition-all duration-75"
+                        style={{ height: `${20 + (audioLevel * 100 * (0.4 + Math.random() * 0.6))}%` }}
                       ></div>
                     ))}
                   </div>
@@ -128,17 +132,29 @@ const App: React.FC = () => {
                 )}
               </div>
 
-              <button
-                onClick={toggleSession}
-                className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all ${
-                  status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING
-                    ? 'bg-red-50 text-red-600 hover:bg-red-100 border-2 border-red-200'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
-              >
-                {status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING ? 'Остановить' : 'Начать урок'}
-              </button>
-              {errorMessage && <p className="text-xs text-red-500">{errorMessage}</p>}
+              <div className="space-y-4">
+                <button
+                  onClick={toggleSession}
+                  className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all ${
+                    status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING
+                      ? 'bg-red-50 text-red-600 hover:bg-red-100 border-2 border-red-200'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200'
+                  }`}
+                >
+                  {status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING ? 'Завершить сессию' : 'Начать разговор'}
+                </button>
+                {errorMessage && (
+                  <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
+                    <p className="text-xs text-red-600 font-medium">{errorMessage}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4 border-t border-slate-50">
+                <p className="text-[11px] text-slate-400 leading-relaxed uppercase tracking-wider font-bold">
+                  Текущий режим: {selectedScenario.title}
+                </p>
+              </div>
             </section>
           </div>
 
