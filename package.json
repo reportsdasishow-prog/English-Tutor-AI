@@ -1,11 +1,10 @@
-
 {
-  "name": "english-tutor-ai",
+  "name": "lingolive-ai",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --open",
+    "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

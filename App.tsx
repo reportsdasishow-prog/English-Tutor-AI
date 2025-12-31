@@ -25,6 +25,8 @@ const App: React.FC = () => {
 
   const handleTranscription = useCallback((text: string, role: 'user' | 'model') => {
     setCurrentPartial({ text, role });
+    // Reset timer to commit the message if silence follows?
+    // In Live API, turnComplete handles the commit logic
   }, []);
 
   const handleStatusChange = useCallback((newStatus: string, error?: string) => {
@@ -34,17 +36,22 @@ const App: React.FC = () => {
       case 'disconnected': 
         setStatus(ConnectionStatus.DISCONNECTED); 
         setAudioLevel(0);
+        setCurrentPartial(null);
         break;
       case 'error': setStatus(ConnectionStatus.ERROR); setErrorMessage(error || 'Ошибка подключения'); break;
     }
   }, []);
 
+  // Sync turnComplete to commit partials to full messages list
+  useEffect(() => {
+    // This is a simplified logic. In a real app, turnComplete message from onmessage
+    // should trigger adding to the `messages` array.
+    // For now, we will handle it in the callback provided to the service.
+  }, []);
+
   const toggleSession = async () => {
     if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.CONNECTING) {
       await serviceRef.current?.stopSession();
-      setStatus(ConnectionStatus.DISCONNECTED);
-      setCurrentPartial(null);
-      setAudioLevel(0);
     } else {
       setMessages([]);
       setCurrentPartial(null);
@@ -52,7 +59,19 @@ const App: React.FC = () => {
         selectedScenario.prompt,
         selectedVoice,
         {
-          onTranscription: handleTranscription,
+          onTranscription: (text, role) => {
+            handleTranscription(text, role);
+            // If the text is empty, it might mean turn ended
+            if (!text && currentPartial) {
+              setMessages(prev => [...prev, {
+                id: Math.random().toString(36),
+                role: currentPartial.role,
+                text: currentPartial.text,
+                timestamp: Date.now()
+              }]);
+              setCurrentPartial(null);
+            }
+          },
           onStatusChange: handleStatusChange,
           onAudioLevel: (lvl) => setAudioLevel(lvl)
         }
